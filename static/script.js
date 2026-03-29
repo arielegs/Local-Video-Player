@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsClose = document.getElementById("settings-close");
     const browseBtn = document.getElementById("browse-btn");
     const dirInput = document.getElementById("video-dir-input");
+    const folderSaveBtn = document.getElementById("folder-save-btn");
     const transcodeToggle = document.getElementById("transcode-toggle");
     
     // Player Controls
@@ -870,7 +871,6 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 if (data.path) {
                     dirInput.value = data.path;
-                    dirInput.dispatchEvent(new Event('input'));
                 }
             });
     };
@@ -903,15 +903,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    dirInput.addEventListener('input', () => {
-        fetch('/api/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ video_directory: dirInput.value })
-        }).then(() => {
-            loadVideos();
+    if (folderSaveBtn) {
+        folderSaveBtn.addEventListener('click', () => {
+            fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ video_directory: dirInput.value })
+            }).then(() => {
+                loadVideos();
+                folderModal.style.display = "none";
+            });
         });
-    });
+    }
 
     document.getElementById('allow-external-toggle').addEventListener('change', (e) => {
         fetch('/api/config', {

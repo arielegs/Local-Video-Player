@@ -212,6 +212,8 @@ expressApp.get('/api/config', (req, res) => {
   });
 
   expressApp.post('/api/config', (req, res) => {
+    let config = loadConfig();
+    let updated = false;
 
     if (req.body.video_directory !== undefined) {
         config.video_directory = req.body.video_directory;
