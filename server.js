@@ -152,7 +152,8 @@ function getVideoFiles(directory) {
             }
         });
 
-        return videoFiles.sort();
+        // Use natural sorting for numbered folders/files (e.g., 1 before 10)
+        return videoFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
     } catch (e) {
         console.error("Error scanning directory:", e);
         return [];
