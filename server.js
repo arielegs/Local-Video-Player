@@ -552,7 +552,7 @@ function startServer(port) {
     }
     
     const server = expressApp.listen(port, '127.0.0.1', () => {
-        console.log(`Server running on port ${port} (Local Only)`);
+        console.log(`Server running on port ${server.address().port} (Local Only)`);
     });
     return server;
 }

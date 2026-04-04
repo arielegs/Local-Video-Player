@@ -83,11 +83,14 @@ function createWindow() {
   // Clear cache to ensure new changes are loaded
   mainWindow.webContents.session.clearCache();
 
-  // Start the Express server first
-  server = startServer(5000);
+  // Start the Express server on a random available port
+  server = startServer(0);
 
-  // Load the URL
-  mainWindow.loadURL('http://127.0.0.1:5000');
+  server.on('listening', () => {
+    const port = server.address().port;
+    // Load the URL with the assigned port
+    mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  });
 
   // Prevent navigation to external sites
   mainWindow.webContents.on('will-navigate', (event, url) => {
