@@ -16,14 +16,14 @@ app.commandLine.appendSwitch('no-pings');
 // Fix for Windows "Access is denied" cache issues in dev mode
 // ONLY apply this in development. In production, use standard UserData for persistence.
 if (!app.isPackaged) {
-    const userDataPath = path.join(app.getPath('temp'), 'LocalVideoPlayerDev');
+    const userDataPath = path.join(app.getPath('temp'), 'Local-Video-PlayerDev');
     app.setPath('userData', userDataPath);
 } else {
     // Ensure consistent user data path for production
-    // Previous versions might have used 'LocalVideoPlayer' (no spaces)
+    // Previous versions might have used 'LocalVideoPlayer' or 'Local-Video-Player'
     // We want to maintain compatibility or force a specific path
     const appData = app.getPath('appData');
-    const userDataPath = path.join(appData, 'LocalVideoPlayer'); // Explicitly match old folder
+    const userDataPath = path.join(appData, 'Local-Video-Player'); // Explicitly match old folder
     app.setPath('userData', userDataPath);
 }
 

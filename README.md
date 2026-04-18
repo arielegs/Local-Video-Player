@@ -78,14 +78,12 @@ The output files will be located in the `dist` folder.
 2.  Double-click to open in Software Center and click **Install**.
 3.  **Or via terminal:**
     ```bash
-    sudo dpkg -i LocalVideoPlayer-1.0.0.deb
-    ```
-4.  Launch "Local Video Player" from your applications menu.
+    sudo dpkg -i Local-Video-Player-1.0.0.deb
 
 ### 🗑️ Uninstalling on Linux (Debian/Ubuntu)
 To uninstall the `.deb` version:
 ```bash
-sudo apt remove local-videoplayer
+sudo apt remove local-video-player
 ```
 
 ---

@@ -1,5 +1,5 @@
 {
-  "name": "local-videoplayer",
+  "name": "local-video-player",
   "version": "1.0.0",
   "description": "A lightweight, local, and private video player.",
   "main": "main.js",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.arielegs.localvideoplayer",
-    "productName": "LocalVideoPlayer",
+    "productName": "Local Video Player",
     "directories": {
       "output": "dist"
     },
