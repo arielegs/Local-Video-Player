@@ -2,7 +2,6 @@ const { app, BrowserWindow, session, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const startServer = require('./server');
-const { registerContextMenu } = require('./contextMenu');
 
 // Heavy background Chromium features disabled to reduce RAM usage footprint and prevent phone-home telemetry
 app.commandLine.appendSwitch('disable-features', 'TranslateUI,BlinkGenPropertyTrees');
@@ -130,8 +129,6 @@ function createWindow() {
 }
 
 app.on('ready', () => {
-    // Register Windows context menu for right-click integration
-    registerContextMenu();
     createWindow();
 });
 

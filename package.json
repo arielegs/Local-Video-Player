@@ -45,7 +45,14 @@
       "allowToChangeInstallationDirectory": true,
       "artifactName": "${productName} Setup.${ext}",
       "uninstallDisplayName": "${productName}",
-      "packElevateHelper": false
+      "packElevateHelper": false,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Local Video Player",
+      "include": "installer.nsi"
     },
     "mac": {
       "target": "dmg",
