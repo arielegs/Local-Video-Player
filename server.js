@@ -67,7 +67,9 @@ function loadConfig() {
         try {
             const fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
             config = { ...config, ...fileConfig };
-        } catch (e) { }
+        } catch (e) { 
+            console.error('Error parsing config file:', e.message);
+        }
     }
     
     // Sync to electron main process
@@ -76,6 +78,19 @@ function loadConfig() {
     }
     
     return config;
+}
+
+// Helper function to safely resolve video paths and prevent traversal attacks
+function resolveVideoPath(baseDir, relativePath) {
+    const resolvedBase = path.resolve(baseDir);
+    const resolvedFull = path.resolve(path.join(resolvedBase, relativePath));
+    
+    // Ensure resolved path is within the base directory
+    if (!resolvedFull.startsWith(resolvedBase + path.sep) && resolvedFull !== resolvedBase) {
+        return null; // Path traversal attempt detected
+    }
+    
+    return resolvedFull;
 }
 
 function saveProgress(videoPath, timestamp) {
@@ -143,6 +158,14 @@ function getVideoFiles(directory) {
         const videoFiles = [];
 
         allFiles.forEach(file => {
+            // Security: reject symlinks and ensure file is within directory
+            try {
+                const stat = fs.lstatSync(file);
+                if (stat.isSymbolicLink()) return; // Skip symlinks
+            } catch (e) {
+                return; // Skip files we can't stat
+            }
+            
             const ext = path.extname(file).toLowerCase();
             if (videoExtensions.has(ext)) {
                 let relPath = path.relative(absDirectory, file);
@@ -217,8 +240,14 @@ expressApp.get('/api/config', (req, res) => {
     let updated = false;
 
     if (req.body.video_directory !== undefined) {
-        config.video_directory = req.body.video_directory;
-        updated = true;
+        // Validate that the directory exists and is accessible
+        const dirToSet = req.body.video_directory;
+        if (dirToSet === '' || (fs.existsSync(dirToSet) && fs.statSync(dirToSet).isDirectory())) {
+            config.video_directory = dirToSet;
+            updated = true;
+        } else {
+            return res.status(400).json({ "status": "error", "message": "Invalid directory path" });
+        }
     }
     
     if (req.body.allow_external !== undefined) {
@@ -311,8 +340,13 @@ expressApp.post('/api/choose-directory', async (req, res) => {
 
 expressApp.get(/^\/api\/metadata\/(.*)/, (req, res) => {
     const config = loadConfig();
+    if (!config.video_directory) return res.json({ duration: 0 });
+    
     const videoPath = decodeURIComponent(req.params[0]);
-    const fullPath = path.join(config.video_directory, videoPath);
+    const fullPath = resolveVideoPath(config.video_directory, videoPath);
+    
+    // Path traversal attempt or invalid path
+    if (!fullPath) return res.status(403).json({ error: 'Access denied' });
 
     if (!fs.existsSync(fullPath)) {
         return res.json({ duration: 0 });
@@ -367,10 +401,14 @@ expressApp.get(/^\/api\/metadata\/(.*)/, (req, res) => {
 // Serve Subtitles (Extract on the fly)
 expressApp.get(/^\/api\/subtitles\/(.*)/, (req, res) => {
     const config = loadConfig();
-    const videoPath = decodeURIComponent(req.params[0]);
     if (!config.video_directory) return res.sendStatus(404);
     
-    const fullPath = path.join(path.resolve(config.video_directory), videoPath);
+    const videoPath = decodeURIComponent(req.params[0]);
+    const fullPath = resolveVideoPath(config.video_directory, videoPath);
+    
+    // Path traversal attempt or invalid path
+    if (!fullPath) return res.status(403).send('Access denied');
+    
     const streamIndex = req.query.streamIndex;
     const startTime = req.query.startTime || 0;
 
@@ -412,13 +450,19 @@ expressApp.get(/^\/api\/subtitles\/(.*)/, (req, res) => {
 // This will transcode audio to AAC and copy video if possible, or transcode both
 expressApp.get(/^\/stream\/(.*)/, (req, res) => {
     const config = loadConfig();
-    const videoPath = decodeURIComponent(req.params[0]);
     if (!config.video_directory) {
          res.status(404).send('No video directory');
          return;
     }
-    const videoDir = path.resolve(config.video_directory);
-    const fullPath = path.join(videoDir, videoPath);
+    
+    const videoPath = decodeURIComponent(req.params[0]);
+    const fullPath = resolveVideoPath(config.video_directory, videoPath);
+    
+    // Path traversal attempt or invalid path
+    if (!fullPath) {
+        res.status(403).send('Access denied');
+        return;
+    }
 
     if (!fs.existsSync(fullPath)) {
         res.status(404).send('Not found');
@@ -532,12 +576,15 @@ expressApp.get(/^\/video\/(.*)/, (req, res) => {
          res.status(404).send('No video directory configured');
          return;
     }
-    const videoDir = path.resolve(config.video_directory);
+    
     const filename = req.params[0]; // Captures the rest of the path
-
-    // Security check: ensure the resolved path is within videoDir
-    // For local app, maybe less strict, but good practice.
-    const fullPath = path.join(videoDir, filename);
+    const fullPath = resolveVideoPath(config.video_directory, filename);
+    
+    // Path traversal attempt or invalid path
+    if (!fullPath) {
+        res.status(403).send('Access denied');
+        return;
+    }
 
     if (fs.existsSync(fullPath)) {
         res.sendFile(fullPath);

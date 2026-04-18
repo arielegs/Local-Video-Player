@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let totalDuration = 0;
     let controlsTimeout;
     let isDragging = false;
+    let videoLoadId = 0; // Unique ID for each video load to prevent race conditions
 
     // Load saved preference
     const savedTranscode = localStorage.getItem('transcodePref');
@@ -105,6 +106,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playVideo(relPath, element, forceTranscode = false) {
+        // Increment load ID to invalidate pending async operations from previous video
+        videoLoadId++;
+        const thisLoadId = videoLoadId;
+        
         // Save progress of previous
         if (currentVideoPath && !videoPlayer.paused) {
             let t = videoPlayer.currentTime;
@@ -168,6 +173,8 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch(`/api/metadata/${encodedPath}`)
             .then(res => res.json())
             .then(meta => {
+                // Check if this load is still current (prevents race condition)
+                if (thisLoadId !== videoLoadId) return;
                 if (currentVideoPath !== relPath) return; // Prevent async metadata loading of old videos
 
                 totalDuration = meta.duration || 0;
@@ -197,6 +204,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetch(`/api/progress/${encodedPath}`)
                     .then(res => res.json())
                     .then(data => {
+                        // Check if this load is still current
+                        if (thisLoadId !== videoLoadId) return;
                         if (currentVideoPath !== relPath) return;
 
                         let savedTime = data.timestamp || 0;
@@ -462,6 +471,8 @@ document.addEventListener('DOMContentLoaded', () => {
          removeSubtitleTracks(); 
          
          const idx = arrayIndex !== undefined ? arrayIndex : availableSubtitles.findIndex(t => t.index === streamIndex);
+         // Validate that idx is within bounds
+         if (idx < 0 || idx >= availableSubtitles.length) return;
          const trackInfo = availableSubtitles[idx];
          if (!trackInfo) return;
 
@@ -485,10 +496,6 @@ document.addEventListener('DOMContentLoaded', () => {
              // Force showing immediately
              if(e.target.track) {
                  e.target.track.mode = 'showing';
-                 
-                 // HACK: Some browsers desync external VTT tracks when video src changes dynamically.
-                 // We can try to force a re-alignment by toggling if it doesn't appear.
-                 // But most likely the issue is the ffmpeg cut vs video keyframe difference.
              }
          };
          trackEl.addEventListener('error', (e) => {
@@ -497,12 +504,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
          videoPlayer.appendChild(trackEl);
          
-         // Immediate mode setting attempt
-         setTimeout(() => {
-             if (videoPlayer.textTracks && videoPlayer.textTracks[0]) {
-                 videoPlayer.textTracks[0].mode = 'showing';
+         // Ensure track is visible - use multiple approaches for better compatibility
+         const ensureSubtitleVisible = () => {
+             if (videoPlayer.textTracks && videoPlayer.textTracks.length > 0) {
+                 for (let i = 0; i < videoPlayer.textTracks.length; i++) {
+                     if (videoPlayer.textTracks[i].label === trackEl.label) {
+                         videoPlayer.textTracks[i].mode = 'showing';
+                         break;
+                     }
+                 }
              }
-         }, 100);
+         };
+         
+         // Try multiple approaches for better compatibility
+         trackEl.addEventListener('load', ensureSubtitleVisible);
+         setTimeout(ensureSubtitleVisible, 50);
+         videoPlayer.addEventListener('loadedmetadata', ensureSubtitleVisible, { once: true });
          
          // UI Updates
          const langName = trackInfo.language === 'und' ? `Sub ${idx+1}` : trackInfo.language.toUpperCase();
