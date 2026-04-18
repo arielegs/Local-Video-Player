@@ -1,6 +1,8 @@
-const { app, BrowserWindow, session, shell } = require('electron');
+const { app, BrowserWindow, session, shell, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const startServer = require('./server');
+const { registerContextMenu } = require('./contextMenu');
 
 // Heavy background Chromium features disabled to reduce RAM usage footprint and prevent phone-home telemetry
 app.commandLine.appendSwitch('disable-features', 'TranslateUI,BlinkGenPropertyTrees');
@@ -29,6 +31,20 @@ if (!app.isPackaged) {
 
 let mainWindow;
 let server;
+let pathToOpen = null; // Store path passed via context menu
+
+// Handle --open argument (context menu integration)
+const args = process.argv.slice(1);
+const openIndex = args.indexOf('--open');
+if (openIndex !== -1 && args[openIndex + 1]) {
+    pathToOpen = args[openIndex + 1];
+}
+
+// Ensure only one instance of the app runs (so second-instance event works)
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -41,7 +57,8 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       spellcheck: false, // Disabling spellcheck saves memory
-      enableWebSQL: false
+      enableWebSQL: false,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 
@@ -90,6 +107,13 @@ function createWindow() {
     const port = server.address().port;
     // Load the URL with the assigned port
     mainWindow.loadURL(`http://127.0.0.1:${port}`);
+    
+    // Send the path to open via IPC if one was provided (context menu)
+    if (pathToOpen) {
+        mainWindow.webContents.on('did-finish-load', () => {
+            mainWindow.webContents.send('open-path', pathToOpen);
+        }, { once: true });
+    }
   });
 
   // Prevent navigation to external sites
@@ -105,7 +129,27 @@ function createWindow() {
   });
 }
 
-app.on('ready', createWindow);
+app.on('ready', () => {
+    // Register Windows context menu for right-click integration
+    registerContextMenu();
+    createWindow();
+});
+
+// Handle context menu opening when app is already running
+app.on('second-instance', (event, argv, workingDirectory) => {
+    // Focus the existing window
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+        
+        // Check for --open argument
+        const openIndex = argv.indexOf('--open');
+        if (openIndex !== -1 && argv[openIndex + 1]) {
+            const pathToOpen = argv[openIndex + 1];
+            mainWindow.webContents.send('open-path', pathToOpen);
+        }
+    }
+});
 
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') {

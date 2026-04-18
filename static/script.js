@@ -27,6 +27,61 @@ document.addEventListener('DOMContentLoaded', () => {
     const playerContainer = document.getElementById('player-container');
     const controls = document.getElementById('video-controls');
     const muteBtn = document.getElementById('mute-btn');
+    
+    // Handle opening paths from context menu (Windows)
+    if (window.electronAPI) {
+        window.electronAPI.onOpenPath((pathToOpen) => {
+            // Determine if it's a file or folder based on file extension
+            const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.ts', '.m3u8', '.mpv'];
+            const fileExtMatch = pathToOpen.match(/\.[a-zA-Z0-9]{2,5}$/);
+            const isLikelyFile = fileExtMatch && videoExtensions.some(ext => 
+                pathToOpen.toLowerCase().endsWith(ext)
+            );
+            
+            let folderPath;
+            if (isLikelyFile) {
+                // Extract directory from file path (handle both / and \)
+                folderPath = pathToOpen.substring(0, Math.max(
+                    pathToOpen.lastIndexOf('\\'),
+                    pathToOpen.lastIndexOf('/')
+                ));
+            } else {
+                // It's a folder
+                folderPath = pathToOpen;
+            }
+            
+            // Set the folder in config and reload
+            fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ video_directory: folderPath })
+            }).then(() => {
+                // Reload videos
+                loadVideos();
+                
+                // If it was a file, play it after videos load
+                if (isLikelyFile) {
+                    // Extract just the filename
+                    const fileName = pathToOpen.substring(Math.max(
+                        pathToOpen.lastIndexOf('\\'),
+                        pathToOpen.lastIndexOf('/')
+                    ) + 1);
+                    
+                    // Wait for videos to load, then find and play the file
+                    setTimeout(() => {
+                        const videoElements = document.querySelectorAll('.video-item');
+                        const targetElement = Array.from(videoElements).find(el => {
+                            const text = el.textContent.trim();
+                            return text === fileName || text.includes(fileName);
+                        });
+                        if (targetElement) {
+                            targetElement.click();
+                        }
+                    }, 500);
+                }
+            }).catch(err => console.error('Failed to set video directory:', err));
+        });
+    }
 
     // New Settings Menu Elements
     const settingsBtn = document.getElementById('settings-btn');
