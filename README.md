@@ -53,9 +53,12 @@ The output files will be located in the `dist` folder.
 3.  Drag the app icon into your `Applications` folder.
 4.  Run it from Launchpad or Spotlight.
 
-**Note on Security:** Since this app is not signed with an Apple Developer ID (which costs \$99/year), macOS might block it initially. To fix this:
-1.  Right-click the app > **Open**.
-2.  Click **Open** in the warning dialog.
+**Note on Security:** Since this app is not signed with an Apple Developer ID (which costs \$99/year), macOS may show a warning on first launch.
+1.  Try: Right-click the app > **Open** > **Open**.
+2.  If macOS says the app is "damaged", remove quarantine attributes in Terminal:
+    ```bash
+    xattr -dr com.apple.quarantine "/Applications/Local Video Player.app"
+    ```
 
 ---
 

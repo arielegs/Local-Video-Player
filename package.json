@@ -51,13 +51,12 @@
       "installerHeaderIcon": "icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Local Video Player",
-      "include": "installer.nsi"
+      "shortcutName": "Local Video Player"
     },
     "mac": {
       "target": "dmg",
       "icon": "icon.png",
-      "identity": null
+      "identity": "-"
     },
     "files": [
       "**/*",

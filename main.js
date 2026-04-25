@@ -30,14 +30,6 @@ if (!app.isPackaged) {
 
 let mainWindow;
 let server;
-let pathToOpen = null; // Store path passed via context menu
-
-// Handle --open argument (context menu integration)
-const args = process.argv.slice(1);
-const openIndex = args.indexOf('--open');
-if (openIndex !== -1 && args[openIndex + 1]) {
-    pathToOpen = args[openIndex + 1];
-}
 
 // Ensure only one instance of the app runs (so second-instance event works)
 const gotTheLock = app.requestSingleInstanceLock();
@@ -107,12 +99,6 @@ function createWindow() {
     // Load the URL with the assigned port
     mainWindow.loadURL(`http://127.0.0.1:${port}`);
     
-    // Send the path to open via IPC if one was provided (context menu)
-    if (pathToOpen) {
-        mainWindow.webContents.on('did-finish-load', () => {
-            mainWindow.webContents.send('open-path', pathToOpen);
-        }, { once: true });
-    }
   });
 
   // Prevent navigation to external sites
@@ -132,19 +118,11 @@ app.on('ready', () => {
     createWindow();
 });
 
-// Handle context menu opening when app is already running
 app.on('second-instance', (event, argv, workingDirectory) => {
     // Focus the existing window
     if (mainWindow) {
         if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.focus();
-        
-        // Check for --open argument
-        const openIndex = argv.indexOf('--open');
-        if (openIndex !== -1 && argv[openIndex + 1]) {
-            const pathToOpen = argv[openIndex + 1];
-            mainWindow.webContents.send('open-path', pathToOpen);
-        }
     }
 });
 
