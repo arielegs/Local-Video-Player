@@ -820,10 +820,17 @@ document.addEventListener('DOMContentLoaded', () => {
         else document.exitFullscreen();
     });
     
+    // Only toggle fullscreen on true video-surface double-clicks.
     playerContainer.addEventListener('dblclick', (e) => {
-        if (settingsMenu.contains(e.target)) return;
+        const interactiveTarget = e.target.closest('button, input, label, .menu-row, .option, .menu-header, #video-controls, #settings-menu');
+        if (interactiveTarget) return;
+        if (e.target !== videoPlayer) return;
         fullscreenBtn.click();
     });
+
+    // Prevent control/menu double-clicks from bubbling to the container handler.
+    controls.addEventListener('dblclick', (e) => e.stopPropagation());
+    settingsMenu.addEventListener('dblclick', (e) => e.stopPropagation());
 
     // Control Visibility
     function showControls() {
