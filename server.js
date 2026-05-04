@@ -27,7 +27,35 @@ ffmpeg.setFfprobePath(ffprobePath);
 
 const expressApp = express();
 
+let AUTH_TOKEN = null;
+
 expressApp.use(express.json());
+
+// Authentication middleware - verifies that all requests include the correct auth token
+// Excludes static files and the homepage
+const authMiddleware = (req, res, next) => {
+    // Skip auth for static files and homepage
+    if (req.path.startsWith('/static/') || req.path === '/') {
+        return next();
+    }
+    
+    if (!AUTH_TOKEN) {
+        // No token set yet - this shouldn't happen, but allow it during startup
+        return next();
+    }
+    
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : null;
+    
+    if (!token || token !== AUTH_TOKEN) {
+        return res.status(401).json({ error: 'Unauthorized - Invalid or missing authentication token' });
+    }
+    
+    next();
+};
+
+// Apply auth middleware to all routes (with exclusions)
+expressApp.use(authMiddleware);
 
 const { app, dialog } = require('electron');
 
@@ -593,13 +621,19 @@ expressApp.get(/^\/video\/(.*)/, (req, res) => {
     }
 });
 
-function startServer(port) {
+function startServer(port, authToken) {
     if (!fs.existsSync(CONFIG_FILE)) {
         fs.writeFileSync(CONFIG_FILE, JSON.stringify({"video_directory": ""}, null, 4));
     }
     
+    // Set the authentication token
+    AUTH_TOKEN = authToken;
+    if (authToken) {
+        console.log('Server authentication enabled');
+    }
+    
     const server = expressApp.listen(port, '127.0.0.1', () => {
-        console.log(`Server running on port ${server.address().port} (Local Only)`);
+        console.log(`Server running on port ${server.address().port} (Local Only - Authentication Required)`);
     });
     return server;
 }

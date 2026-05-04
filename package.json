@@ -80,7 +80,8 @@
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "fluent-ffmpeg": "^2.1.3"
+    "fluent-ffmpeg": "^2.1.3",
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "electron": "^40.6.0",

@@ -3,17 +3,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const authToken = urlParams.get('token');
     
-    console.log('Page loaded with URL:', window.location.href);
-    console.log('Auth token from URL:', authToken ? authToken.substring(0, 8) + '...' : 'MISSING');
-    
     // Helper function to make authenticated fetch requests
     const authenticatedFetch = (url, options = {}) => {
         const headers = options.headers || {};
         if (authToken) {
             headers.Authorization = `Bearer ${authToken}`;
-            console.log(`Sending ${options.method || 'GET'} to ${url} WITH token`);
-        } else {
-            console.warn(`Sending ${options.method || 'GET'} to ${url} WITHOUT token!`);
         }
         return fetch(url, { ...options, headers });
     };
@@ -960,7 +954,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('allow-external-toggle').addEventListener('change', (e) => {
-        authenticatedFetch('/api/config', {
+        fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
