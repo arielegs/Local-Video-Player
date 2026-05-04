@@ -1,23 +1,4 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Authentication ---
-    const urlParams = new URLSearchParams(window.location.search);
-    const authToken = urlParams.get('token');
-    
-    console.log('Page loaded with URL:', window.location.href);
-    console.log('Auth token from URL:', authToken ? authToken.substring(0, 8) + '...' : 'MISSING');
-    
-    // Helper function to make authenticated fetch requests
-    const authenticatedFetch = (url, options = {}) => {
-        const headers = options.headers || {};
-        if (authToken) {
-            headers.Authorization = `Bearer ${authToken}`;
-            console.log(`Sending ${options.method || 'GET'} to ${url} WITH token`);
-        } else {
-            console.warn(`Sending ${options.method || 'GET'} to ${url} WITHOUT token!`);
-        }
-        return fetch(url, { ...options, headers });
-    };
-    
     // --- Elements ---
     const videoList = document.getElementById('video-list');
     const videoPlayer = document.getElementById('video-player');
@@ -76,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Core Video Logic ---
 
     function loadVideos() {
-        authenticatedFetch('/api/videos')
+        fetch('/api/videos')
             .then(response => response.json())
             .then(videos => {
                 videoList.innerHTML = '';
@@ -95,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 
                 // Last played
-                authenticatedFetch('/api/last_played')
+                fetch('/api/last_played')
                     .then(r => r.json())
                     .then(data => {
                         if(data.last_played) highlightLastPlayed(data.last_played);
@@ -189,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         videoPlayer.innerHTML = ''; 
 
         // Fetch Metadata
-        authenticatedFetch(`/api/metadata/${encodedPath}`)
+        fetch(`/api/metadata/${encodedPath}`)
             .then(res => res.json())
             .then(meta => {
                 // Check if this load is still current (prevents race condition)
@@ -220,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupSubtitleMenu(meta.subtitleTracks, encodedPath);
 
                 // Load Progress
-                authenticatedFetch(`/api/progress/${encodedPath}`)
+                fetch(`/api/progress/${encodedPath}`)
                     .then(res => res.json())
                     .then(data => {
                         // Check if this load is still current
@@ -882,7 +863,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = path || currentVideoPath;
         const t = (time !== undefined) ? time : videoPlayer.currentTime;
         if (!p) return;
-        authenticatedFetch('/api/progress', {
+        fetch('/api/progress', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ video_path: p, timestamp: t }),
@@ -892,24 +873,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Directory Browser
     folderBtn.onclick = () => { 
         folderModal.style.display = "block"; 
-        authenticatedFetch('/api/config').then(r => r.json()).then(config => {
+        fetch('/api/config').then(r => r.json()).then(config => {
             if(config.video_directory) dirInput.value = config.video_directory;
         });
     };
 
     appSettingsBtn.onclick = () => {
         settingsModal.style.display = "block";
-        authenticatedFetch('/api/config').then(r => r.json()).then(config => {
+        fetch('/api/config').then(r => r.json()).then(config => {
             document.getElementById('allow-external-toggle').checked = config.allow_external === true;
         });
-        authenticatedFetch('/api/about').then(r => r.json()).then(about => {
+        fetch('/api/about').then(r => r.json()).then(about => {
             document.getElementById('app-version').innerText = about.version;
             document.getElementById('app-build-date').innerText = about.buildDate;
         });
     }
 
     browseBtn.onclick = () => {
-        authenticatedFetch('/api/choose-directory', { method: 'POST' })
+        fetch('/api/choose-directory', { method: 'POST' })
             .then(r => r.json())
             .then(data => {
                 if (data.path) {
@@ -948,7 +929,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (folderSaveBtn) {
         folderSaveBtn.addEventListener('click', () => {
-            authenticatedFetch('/api/config', {
+            fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ video_directory: dirInput.value })
@@ -960,7 +941,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('allow-external-toggle').addEventListener('change', (e) => {
-        authenticatedFetch('/api/config', {
+        fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 

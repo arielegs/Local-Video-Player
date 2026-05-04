@@ -1,7 +1,6 @@
 const { app, BrowserWindow, session, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 const startServer = require('./server');
 
 // Heavy background Chromium features disabled to reduce RAM usage footprint and prevent phone-home telemetry
@@ -31,10 +30,6 @@ if (!app.isPackaged) {
 
 let mainWindow;
 let server;
-
-// Generate authentication token for secure communication between Electron app and server
-const authToken = uuidv4();
-global.authToken = authToken;
 
 // Ensure only one instance of the app runs (so second-instance event works)
 const gotTheLock = app.requestSingleInstanceLock();
@@ -96,13 +91,13 @@ function createWindow() {
   // Clear cache to ensure new changes are loaded
   mainWindow.webContents.session.clearCache();
 
-  // Start the Express server on a random available port with authentication token
-  server = startServer(0, authToken);
+  // Start the Express server on a random available port
+  server = startServer(0);
 
   server.on('listening', () => {
     const port = server.address().port;
-    // Load the URL with the assigned port and include the authentication token
-    mainWindow.loadURL(`http://127.0.0.1:${port}?token=${encodeURIComponent(authToken)}`);
+    // Load the URL with the assigned port
+    mainWindow.loadURL(`http://127.0.0.1:${port}`);
     
   });
 
