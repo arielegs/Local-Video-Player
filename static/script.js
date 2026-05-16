@@ -1,4 +1,108 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Authentication ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const authToken = urlParams.get('token');
+    
+    console.log('Page loaded with URL:', window.location.href);
+    console.log('Auth token from URL:', authToken ? authToken.substring(0, 8) + '...' : 'MISSING');
+    
+    // Helper function to make authenticated fetch requests
+    const authenticatedFetch = (url, options = {}) => {
+        const headers = options.headers || {};
+        if (authToken) {
+            headers.Authorization = `Bearer ${authToken}`;
+            console.log(`Sending ${options.method || 'GET'} to ${url} WITH token`);
+        } else {
+            console.warn(`Sending ${options.method || 'GET'} to ${url} WITHOUT token!`);
+        }
+        return fetch(url, { ...options, headers });
+    };
+
+    // --- Error/Notification System ---
+    const notificationContainer = document.getElementById('error-notifications');
+
+    function showNotification(type, title, message, duration = 5000) {
+        const notification = document.createElement('div');
+        notification.className = `error-notification ${type}`;
+        
+        const icons = {
+            error: '⚠️',
+            warning: '⚠️',
+            info: 'ℹ️',
+            success: '✓'
+        };
+
+        notification.innerHTML = `
+            <div class="error-notification-icon">${icons[type] || '✓'}</div>
+            <div class="error-notification-content">
+                ${title ? `<div class="error-notification-title">${escapeHtml(title)}</div>` : ''}
+                <div class="error-notification-message">${escapeHtml(message)}</div>
+            </div>
+            <button class="error-notification-close" aria-label="Close notification">✕</button>
+        `;
+
+        const closeBtn = notification.querySelector('.error-notification-close');
+        closeBtn.addEventListener('click', () => removeNotification(notification));
+
+        notificationContainer.appendChild(notification);
+
+        if (duration > 0) {
+            setTimeout(() => removeNotification(notification), duration);
+        }
+
+        return notification;
+    }
+
+    function removeNotification(notification) {
+        notification.classList.add('removing');
+        setTimeout(() => notification.remove(), 300);
+    }
+
+    function showError(title, message, duration = 6000) {
+        console.error(`[${title}] ${message}`);
+        return showNotification('error', title, message, duration);
+    }
+
+    function showWarning(title, message, duration = 5000) {
+        console.warn(`[${title}] ${message}`);
+        return showNotification('warning', title, message, duration);
+    }
+
+    function showSuccess(message, duration = 3000) {
+        console.log(`[Success] ${message}`);
+        return showNotification('success', null, message, duration);
+    }
+
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // --- Loading Indicators ---
+    function showLoading(message = 'Loading video...') {
+        loadingText.textContent = message;
+        loadingOverlay.style.display = 'flex';
+    }
+
+    function hideLoading() {
+        loadingOverlay.style.display = 'none';
+    }
+
+    function showTranscodingStatus(visible = true) {
+        transcodingIndicator.style.display = visible ? 'flex' : 'none';
+    }
+
+    function setTranscodingMessage(message = 'Transcoding...') {
+        transcodeStatus.textContent = message;
+    }
+
+
     // --- Elements ---
     const videoList = document.getElementById('video-list');
     const videoPlayer = document.getElementById('video-player');
@@ -18,6 +122,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Player Controls
     const playPauseBtn = document.getElementById('play-pause');
+    const prevVideoBtn = document.getElementById('prev-video');
+    const nextVideoBtn = document.getElementById('next-video');
     const progressBarContainer = document.getElementById('progress-bar-container');
     const progressBar = document.getElementById('progress-bar');
     const timeTooltip = document.getElementById('time-tooltip');
@@ -33,8 +139,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsMenu = document.getElementById('settings-menu');
     const ccBtn = document.getElementById('cc-btn');
     
+    // Loading Indicators
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingText = document.getElementById('loading-text');
+    const transcodingIndicator = document.getElementById('transcoding-indicator');
+    const transcodeStatus = document.getElementById('transcode-status');
+    
     // --- State ---
     let currentVideoPath = null;
+    let currentVideoIndex = -1;
+    let allVideos = []; // Array of all available videos
+    let currentVideoElement = null; // Reference to the current video list item
     let isTranscoding = false;
     let currentVideoCodec = null; 
     let currentAudioTrack = null; // null means default track
@@ -46,6 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let controlsTimeout;
     let isDragging = false;
     let videoLoadId = 0; // Unique ID for each video load to prevent race conditions
+    
+    // Folder Polling
+    let lastKnownVideos = [];
+    let pollingInterval = null;
+    const POLLING_INTERVAL_MS = 3000; // Poll every 3 seconds
 
     // Load saved preference
     const savedTranscode = localStorage.getItem('transcodePref');
@@ -57,10 +177,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Core Video Logic ---
 
     function loadVideos() {
-        fetch('/api/videos')
-            .then(response => response.json())
+        authenticatedFetch('/api/videos')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: Failed to fetch video list`);
+                }
+                return response.json();
+            })
             .then(videos => {
                 videoList.innerHTML = '';
+                if (!videos || videos.length === 0) {
+                    const emptyMsg = document.createElement('div');
+                    emptyMsg.style.cssText = 'padding: 20px; color: #888; text-align: center; font-size: 0.9em;';
+                    emptyMsg.textContent = 'No videos found in the selected folder.';
+                    videoList.appendChild(emptyMsg);
+                    showWarning('No Videos', 'The selected folder appears to be empty or inaccessible.');
+                    lastKnownVideos = [];
+                    allVideos = [];
+                    return;
+                }
+                
+                // Update last known videos and store all videos for navigation
+                lastKnownVideos = [...videos];
+                allVideos = [...videos];
+                
                 videos.forEach(video => {
                     const div = document.createElement('div');
                     div.className = 'video-item';
@@ -73,14 +213,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     div.onclick = () => playVideo(video, div);
                     videoList.appendChild(div);
+                    
+                    // Load progress for this video
+                    loadVideoProgress(video, div);
                 });
                 
                 // Last played
-                fetch('/api/last_played')
-                    .then(r => r.json())
+                authenticatedFetch('/api/last_played')
+                    .then(r => r.ok ? r.json() : Promise.reject('Failed to load last played'))
                     .then(data => {
                         if(data.last_played) highlightLastPlayed(data.last_played);
-                    });
+                    })
+                    .catch(e => console.log('Could not restore last played:', e));
+            })
+            .catch(error => {
+                videoList.innerHTML = '';
+                const errorMsg = document.createElement('div');
+                errorMsg.style.cssText = 'padding: 20px; color: #f44; text-align: center; font-size: 0.9em;';
+                errorMsg.textContent = 'Failed to load videos. Check the folder path in settings.';
+                videoList.appendChild(errorMsg);
+                showError('Failed to Load Videos', 'Cannot access the video folder. ' + error.message);
+                console.error('Error loading videos:', error);
             });
     }
 
@@ -105,10 +258,103 @@ document.addEventListener('DOMContentLoaded', () => {
         Array.from(videoPlayer.querySelectorAll('track')).forEach(t => t.remove());
     }
 
+    // --- Folder Polling System ---
+    function startFolderPolling() {
+        if (pollingInterval) return; // Already polling
+        
+        pollingInterval = setInterval(() => {
+            checkForVideoChanges();
+        }, POLLING_INTERVAL_MS);
+        
+        console.log(`Folder polling started (interval: ${POLLING_INTERVAL_MS}ms)`);
+    }
+
+    function stopFolderPolling() {
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+            console.log('Folder polling stopped');
+        }
+    }
+
+    function checkForVideoChanges() {
+        authenticatedFetch('/api/videos')
+            .then(response => {
+                if (!response.ok) throw new Error('Failed to fetch videos');
+                return response.json();
+            })
+            .then(videos => {
+                if (!videos) videos = [];
+                
+                // Compare with last known state
+                const videosChanged = JSON.stringify(videos.sort()) !== JSON.stringify(lastKnownVideos.sort());
+                
+                if (videosChanged) {
+                    console.log('Video list changed detected');
+                    
+                    // Find added and removed videos
+                    const added = videos.filter(v => !lastKnownVideos.includes(v));
+                    const removed = lastKnownVideos.filter(v => !videos.includes(v));
+                    
+                    // Update the list
+                    lastKnownVideos = [...videos];
+                    loadVideos();
+                    
+                    // Show notification
+                    if (added.length > 0 || removed.length > 0) {
+                        let message = '';
+                        if (added.length > 0) {
+                            message += `Added: ${added.length} video${added.length > 1 ? 's' : ''}`;
+                        }
+                        if (removed.length > 0) {
+                            if (message) message += ' | ';
+                            message += `Removed: ${removed.length} video${removed.length > 1 ? 's' : ''}`;
+                        }
+                        showSuccess(`Folder updated - ${message}`);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error checking for video changes:', error);
+                // Continue polling even on error
+            });
+    }
+
+    // --- Watch History Visualization ---
+    function loadVideoProgress(videoPath, videoElement) {
+        const encodedPath = encodeURIComponent(videoPath);
+        
+        authenticatedFetch(`/api/progress/${encodedPath}`)
+            .then(res => res.ok ? res.json() : Promise.resolve({ timestamp: 0, duration: 0 }))
+            .then(data => {
+                if (!data) return;
+                
+                // Get duration from metadata to calculate percentage
+                authenticatedFetch(`/api/metadata/${encodedPath}`)
+                    .then(res => res.ok ? res.json() : Promise.resolve({ duration: 0 }))
+                    .then(meta => {
+                        const watched = data.timestamp || 0;
+                        const duration = meta.duration || 1;
+                        const percentage = Math.min(100, (watched / duration) * 100);
+                        
+                        // Update tooltip with watch progress
+                        const timeWatched = formatTime(watched);
+                        const totalTime = formatTime(duration);
+                        videoElement.title = `${videoPath}\nWatched: ${timeWatched} / ${totalTime} (${Math.round(percentage)}%)`;
+                    })
+                    .catch(e => console.log('Could not load metadata for progress:', e));
+            })
+            .catch(e => console.log('Could not load progress for video:', e));
+    }
+
     function playVideo(relPath, element, forceTranscode = false) {
         // Increment load ID to invalidate pending async operations from previous video
         videoLoadId++;
         const thisLoadId = videoLoadId;
+        
+        // Track the current video index and element
+        currentVideoIndex = allVideos.indexOf(relPath);
+        currentVideoElement = element;
         
         // Save progress of previous
         if (currentVideoPath && !videoPlayer.paused) {
@@ -167,15 +413,33 @@ document.addEventListener('DOMContentLoaded', () => {
         removeSubtitleTracks();
         
         // FULL CLEANUP
-        videoPlayer.innerHTML = ''; 
+        videoPlayer.innerHTML = '';
+        
+        // Show loading indicator
+        showLoading('Loading video metadata...');
+        
+        // Show transcoding status if active
+        if (isTranscoding) {
+            showTranscodingStatus(true);
+            setTranscodingMessage('Preparing video stream...');
+        } else {
+            showTranscodingStatus(false);
+        }
 
         // Fetch Metadata
-        fetch(`/api/metadata/${encodedPath}`)
-            .then(res => res.json())
+        authenticatedFetch(`/api/metadata/${encodedPath}`)
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}: Cannot read video metadata`);
+                return res.json();
+            })
             .then(meta => {
                 // Check if this load is still current (prevents race condition)
                 if (thisLoadId !== videoLoadId) return;
                 if (currentVideoPath !== relPath) return; // Prevent async metadata loading of old videos
+
+                if (!meta || typeof meta.duration === 'undefined') {
+                    throw new Error('Invalid or corrupted video file');
+                }
 
                 totalDuration = meta.duration || 0;
                 currentVideoCodec = meta.videoCodec;
@@ -201,8 +465,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupSubtitleMenu(meta.subtitleTracks, encodedPath);
 
                 // Load Progress
-                fetch(`/api/progress/${encodedPath}`)
-                    .then(res => res.json())
+                authenticatedFetch(`/api/progress/${encodedPath}`)
+                    .then(res => res.ok ? res.json() : Promise.resolve({ timestamp: 0 }))
                     .then(data => {
                         // Check if this load is still current
                         if (thisLoadId !== videoLoadId) return;
@@ -210,13 +474,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         let savedTime = data.timestamp || 0;
                         
-                        // Error fallback
-                        const errorHandler = () => {
+                        // Error fallback - comprehensive error handling
+                        const errorHandler = (errorEvent) => {
+                             hideLoading();
                              if (!isTranscoding) {
-                                  console.warn("Playback failed, forcing transcode...");
+                                  const errorCode = videoPlayer.error?.code;
+                                  const errorMessages = {
+                                      1: 'Video file not found or access denied',
+                                      2: 'Network error - cannot download video',
+                                      3: 'Playback was aborted',
+                                      4: 'Video format not supported by your browser'
+                                  };
+                                  const msg = errorMessages[errorCode] || 'Unknown playback error';
+                                  showWarning('Playback Failed', `${msg}. Trying Compatibility Mode...`, 8000);
+                                  console.warn("Playback failed, forcing transcode...", msg);
                                   videoPlayer.removeEventListener('error', errorHandler);
                                   transcodeToggle.checked = true; 
                                   playVideo(relPath, element, true);
+                             } else {
+                                  showError('Cannot Play Video', 'Video playback failed even in Compatibility Mode. File may be corrupted or unsupported.');
+                                  videoPlayer.removeEventListener('error', errorHandler);
                              }
                         };
                         videoPlayer.addEventListener('error', errorHandler, { once: true });
@@ -237,9 +514,25 @@ document.addEventListener('DOMContentLoaded', () => {
                             enableSubtitle(currentSubtitleTrack, undefined, encodedPath);
                         }
 
-                        videoPlayer.play().catch(e => console.log("Autoplay blocked", e));
+                        videoPlayer.play().catch(e => {
+                            hideLoading();
+                            if (e.name === 'NotAllowedError') {
+                                console.log('Autoplay blocked by browser policy');
+                            } else {
+                                console.error('Playback error:', e);
+                                showError('Playback Error', 'Failed to start video playback. ' + e.message, 5000);
+                            }
+                        });
                     });
-            }); 
+            })
+            .catch(error => {
+                if (thisLoadId !== videoLoadId) return;
+                hideLoading();
+                showTranscodingStatus(false);
+                console.error('Error loading video:', error);
+                showError('Cannot Load Video', `${error.message}. Make sure the file exists and is readable.`);
+                document.getElementById('current-video-title').textContent = 'Error loading video';
+            });
     }
 
     function highlightLastPlayed(path) {
@@ -500,6 +793,7 @@ document.addEventListener('DOMContentLoaded', () => {
          };
          trackEl.addEventListener('error', (e) => {
              console.error('Subtitle track failed to load', e);
+             showWarning('Subtitle Load Failed', `Could not load subtitle track: ${trackInfo.title || 'Unknown'}`, 4000);
          });
 
          videoPlayer.appendChild(trackEl);
@@ -554,6 +848,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     playPauseBtn.addEventListener('click', togglePlay);
+    
+    // Next video button handler
+    nextVideoBtn.addEventListener('click', () => {
+        if (allVideos.length === 0 || currentVideoIndex < 0) return;
+        const nextIndex = currentVideoIndex + 1;
+        if (nextIndex < allVideos.length) {
+            // Find the video item by path matching
+            const items = videoList.querySelectorAll('.video-item');
+            if (nextIndex < items.length) {
+                playVideo(allVideos[nextIndex], items[nextIndex]);
+            }
+        }
+        nextVideoBtn.blur(); // Remove focus
+    });
+    
+    // Previous video button handler
+    prevVideoBtn.addEventListener('click', () => {
+        if (allVideos.length === 0 || currentVideoIndex < 0) return;
+        const prevIndex = currentVideoIndex - 1;
+        if (prevIndex >= 0) {
+            // Find the video item by index
+            const items = videoList.querySelectorAll('.video-item');
+            if (prevIndex < items.length) {
+                playVideo(allVideos[prevIndex], items[prevIndex]);
+            }
+        }
+        prevVideoBtn.blur(); // Remove focus
+    });
+    
+    // Auto-play next video when current video ends
+    videoPlayer.addEventListener('ended', () => {
+        if (allVideos.length === 0 || currentVideoIndex < 0) return;
+        const nextIndex = currentVideoIndex + 1;
+        if (nextIndex < allVideos.length) {
+            // Find the video item by index
+            const items = videoList.querySelectorAll('.video-item');
+            if (nextIndex < items.length) {
+                playVideo(allVideos[nextIndex], items[nextIndex]);
+            }
+        }
+    });
+    
     videoPlayer.addEventListener('click', (e) => {
         if (settingsMenu.contains(e.target) || e.target === settingsBtn) return;
         togglePlay();
@@ -563,11 +899,33 @@ document.addEventListener('DOMContentLoaded', () => {
          playPauseBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" fill="#fff"/></svg>';
          isDragging = false; // Reset drag state to ensure updates resume
          showControls();
+         hideLoading();
     });
     
     videoPlayer.addEventListener('pause', () => {
          playPauseBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#fff"/></svg>';
          showControls();
+    });
+
+    // Hide loading when video is ready to play
+    videoPlayer.addEventListener('canplay', () => {
+         hideLoading();
+    });
+
+    // Show loading when video is seeking
+    videoPlayer.addEventListener('seeking', () => {
+         if (isTranscoding) {
+             showLoading('Seeking video...');
+             setTranscodingMessage('Processing stream...');
+         }
+    });
+
+    // Update transcoding status when playing
+    videoPlayer.addEventListener('playing', () => {
+         if (isTranscoding) {
+             showTranscodingStatus(true);
+             setTranscodingMessage('Streaming...');
+         }
     });
 
     // Mute
@@ -863,34 +1221,40 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = path || currentVideoPath;
         const t = (time !== undefined) ? time : videoPlayer.currentTime;
         if (!p) return;
-        fetch('/api/progress', {
+        authenticatedFetch('/api/progress', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ video_path: p, timestamp: t }),
+        }).then(() => {
+            // Update the progress bar in the video list
+            const videoItem = document.querySelector(`[data-path="${p}"]`);
+            if (videoItem) {
+                loadVideoProgress(p, videoItem);
+            }
         });
     }
 
     // Directory Browser
     folderBtn.onclick = () => { 
         folderModal.style.display = "block"; 
-        fetch('/api/config').then(r => r.json()).then(config => {
+        authenticatedFetch('/api/config').then(r => r.json()).then(config => {
             if(config.video_directory) dirInput.value = config.video_directory;
         });
     };
 
     appSettingsBtn.onclick = () => {
         settingsModal.style.display = "block";
-        fetch('/api/config').then(r => r.json()).then(config => {
+        authenticatedFetch('/api/config').then(r => r.json()).then(config => {
             document.getElementById('allow-external-toggle').checked = config.allow_external === true;
         });
-        fetch('/api/about').then(r => r.json()).then(about => {
+        authenticatedFetch('/api/about').then(r => r.json()).then(about => {
             document.getElementById('app-version').innerText = about.version;
             document.getElementById('app-build-date').innerText = about.buildDate;
         });
     }
 
     browseBtn.onclick = () => {
-        fetch('/api/choose-directory', { method: 'POST' })
+        authenticatedFetch('/api/choose-directory', { method: 'POST' })
             .then(r => r.json())
             .then(data => {
                 if (data.path) {
@@ -929,19 +1293,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (folderSaveBtn) {
         folderSaveBtn.addEventListener('click', () => {
-            fetch('/api/config', {
+            const dirPath = dirInput.value.trim();
+            if (!dirPath) {
+                showWarning('Invalid Path', 'Please enter a valid folder path.');
+                return;
+            }
+            authenticatedFetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ video_directory: dirInput.value })
+                body: JSON.stringify({ video_directory: dirPath })
+            }).then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to save settings`);
+                return res.json();
             }).then(() => {
+                showSuccess('Folder Updated - Loading videos...');
+                lastKnownVideos = []; // Reset polling state
+                stopFolderPolling();
                 loadVideos();
+                startFolderPolling();
                 folderModal.style.display = "none";
+            }).catch(error => {
+                showError('Failed to Save Folder', 'Could not change the video folder. ' + error.message);
+                console.error('Folder save error:', error);
             });
         });
     }
 
     document.getElementById('allow-external-toggle').addEventListener('change', (e) => {
-        fetch('/api/config', {
+        authenticatedFetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -1035,4 +1414,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     loadVideos();
+    startFolderPolling();
 });

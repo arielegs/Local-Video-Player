@@ -28,6 +28,12 @@ if (!app.isPackaged) {
     app.setPath('userData', userDataPath);
 }
 
+// Fix for macOS video decoder corruption after system sleep/lock
+// This disables hardware acceleration, forcing CPU decoding to ensure video always resumes perfectly.
+if (process.platform === 'darwin') {
+    app.disableHardwareAcceleration();
+}
+
 let mainWindow;
 let server;
 
