@@ -60,6 +60,8 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
 const LAST_PLAYED_FILE = path.join(DATA_DIR, 'last_played.json');
 
+const metadataMap = new Map();
+
 // Helper functions (same logic as Python)
 function loadConfig() {
     let config = { "video_directory": "", "allow_external": false };
@@ -352,6 +354,16 @@ expressApp.get(/^\/api\/metadata\/(.*)/, (req, res) => {
         return res.json({ duration: 0 });
     }
 
+    try {
+        const stat = fs.statSync(fullPath);
+        const cached = metadataMap.get(fullPath);
+        if (cached && cached.mtime === stat.mtimeMs) {
+            console.log(`[Cache HIT] Metadata for ${path.basename(fullPath)}`);
+            return res.json(cached.metadata);
+        }
+    } catch(e) {}
+
+    console.log(`[Cache MISS] Probing metadata for ${path.basename(fullPath)}`);
     ffmpeg.ffprobe(fullPath, (err, metadata) => {
         if (err) {
             console.error("FFprobe error:", err);
@@ -389,12 +401,18 @@ expressApp.get(/^\/api\/metadata\/(.*)/, (req, res) => {
             });
         }
 
-        res.json({ 
+        const result = { 
             duration: parseFloat(d) || 0,
             videoCodec: vCodec,
             audioTracks: audioTracks,
             subtitleTracks: subtitleTracks
-        });
+        };
+
+        try {
+            metadataMap.set(fullPath, { metadata: result, mtime: fs.statSync(fullPath).mtimeMs });
+        } catch(e) {}
+
+        res.json(result);
     });
 });
 

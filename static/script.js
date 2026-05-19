@@ -95,11 +95,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showTranscodingStatus(visible = true) {
-        transcodingIndicator.style.display = visible ? 'flex' : 'none';
+        // Removed
     }
 
     function setTranscodingMessage(message = 'Transcoding...') {
-        transcodeStatus.textContent = message;
+        // Removed
     }
 
 
@@ -142,8 +142,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Loading Indicators
     const loadingOverlay = document.getElementById('loading-overlay');
     const loadingText = document.getElementById('loading-text');
-    const transcodingIndicator = document.getElementById('transcoding-indicator');
-    const transcodeStatus = document.getElementById('transcode-status');
     
     // --- State ---
     let currentVideoPath = null;
@@ -325,24 +323,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const encodedPath = encodeURIComponent(videoPath);
         
         authenticatedFetch(`/api/progress/${encodedPath}`)
-            .then(res => res.ok ? res.json() : Promise.resolve({ timestamp: 0, duration: 0 }))
+            .then(res => res.ok ? res.json() : Promise.resolve({ timestamp: 0 }))
             .then(data => {
-                if (!data) return;
+                if (!data || !data.timestamp) return;
+
+                const watched = data.timestamp;
+                const timeWatched = formatTime(watched);
                 
-                // Get duration from metadata to calculate percentage
-                authenticatedFetch(`/api/metadata/${encodedPath}`)
-                    .then(res => res.ok ? res.json() : Promise.resolve({ duration: 0 }))
-                    .then(meta => {
-                        const watched = data.timestamp || 0;
-                        const duration = meta.duration || 1;
-                        const percentage = Math.min(100, (watched / duration) * 100);
-                        
-                        // Update tooltip with watch progress
-                        const timeWatched = formatTime(watched);
-                        const totalTime = formatTime(duration);
-                        videoElement.title = `${videoPath}\nWatched: ${timeWatched} / ${totalTime} (${Math.round(percentage)}%)`;
-                    })
-                    .catch(e => console.log('Could not load metadata for progress:', e));
+                // Update tooltip with watch progress (without probing metadata for duration)
+                videoElement.title = `${videoPath}\nWatched up to: ${timeWatched}`;
             })
             .catch(e => console.log('Could not load progress for video:', e));
     }
