@@ -152,7 +152,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentVideoCodec = null; 
     let currentAudioTrack = null; // null means default track
     let currentSubtitleTrack = -1; // -1 for off
+    let currentBurnSubtitleTrack = null; // absolute stream index for burned-in subtitles
     let availableSubtitles = [];
+    const supportedSubtitleCodecs = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text']);
+
+    function isSubtitleWebVttConvertible(track) {
+        if (!track || !track.codec) return true;
+        return supportedSubtitleCodecs.has(String(track.codec).toLowerCase());
+    }
+
+    function buildStreamUrl(encodedPath, startTime) {
+        let url = `/stream/${encodedPath}?startTime=${startTime}&vCodec=${currentVideoCodec || ''}`;
+        if (currentAudioTrack !== null) url += `&audioIndex=${currentAudioTrack}`;
+        if (currentBurnSubtitleTrack !== null) url += `&subtitleIndex=${currentBurnSubtitleTrack}`;
+        return url;
+    }
     
     let streamOffset = 0;
     let totalDuration = 0;
@@ -387,6 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         totalDuration = 0;
         currentAudioTrack = null; 
         currentSubtitleTrack = -1;
+        currentBurnSubtitleTrack = null;
         
         // UI Reset
         videoPlayer.playbackRate = 1.0;
@@ -489,10 +504,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         if (isTranscoding) {
                             streamOffset = savedTime;
-                            let url = `/stream/${encodedPath}?startTime=${savedTime}&vCodec=${currentVideoCodec || ''}`;
-                            // Use strict check for null, allow 0
-                            if(currentAudioTrack !== null) url += `&audioIndex=${currentAudioTrack}`;
-                            videoPlayer.src = url;
+                            videoPlayer.src = buildStreamUrl(encodedPath, savedTime);
                         } else {
                             videoPlayer.src = `/video/${encodedPath}`;
                             videoPlayer.currentTime = savedTime;
@@ -657,8 +669,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 streamOffset = t;
                 const encodedPath = encodeURIComponent(currentVideoPath);
+                currentBurnSubtitleTrack = null;
                 // Fix: use track.index NOT loop index i
-                videoPlayer.src = `/stream/${encodedPath}?startTime=${t}&vCodec=${currentVideoCodec || ''}&audioIndex=${track.index}`;
+                videoPlayer.src = buildStreamUrl(encodedPath, t);
                 
                 if (currentSubtitleTrack !== -1) {
                     enableSubtitle(currentSubtitleTrack, undefined, encodedPath);
@@ -717,7 +730,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const div = document.createElement('div');
             div.className = 'option';
             const lang = track.language === 'und' ? `Sub ${i+1}` : track.language.toUpperCase();
-            div.textContent = `${lang} ${track.title ? '- ' + track.title : ''}`;
+            const unsupported = !isSubtitleWebVttConvertible(track);
+            const codecLabel = track.codec ? ` (${track.codec})` : '';
+            div.textContent = `${lang} ${track.title ? '- ' + track.title : ''}${codecLabel}${unsupported ? ' [burn-in]' : ''}`;
+            if (unsupported) div.style.opacity = '0.55';
             
             if (track.index === currentSubtitleTrack) div.classList.add('selected');
 
@@ -733,6 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function disableSubtitles() {
         currentSubtitleTrack = -1;
+        currentBurnSubtitleTrack = null;
         removeSubtitleTracks();
         
         // UI Updates
@@ -757,6 +774,33 @@ document.addEventListener('DOMContentLoaded', () => {
          if (idx < 0 || idx >= availableSubtitles.length) return;
          const trackInfo = availableSubtitles[idx];
          if (!trackInfo) return;
+
+         // For non-text codecs (e.g., PGS/DVD), burn subtitles into compatibility stream.
+         if (!isSubtitleWebVttConvertible(trackInfo)) {
+             if (!isTranscoding) {
+                 isTranscoding = true;
+                 transcodeToggle.checked = true;
+             }
+
+             currentBurnSubtitleTrack = streamIndex;
+             removeSubtitleTracks();
+
+             const currentAbsoluteTime = isTranscoding ? (streamOffset + videoPlayer.currentTime) : (videoPlayer.currentTime || 0);
+             streamOffset = currentAbsoluteTime;
+             videoPlayer.src = buildStreamUrl(encodedPath, currentAbsoluteTime);
+             videoPlayer.play().catch(e => console.log('Subtitle burn-in play suppressed', e));
+
+             const langName = trackInfo.language === 'und' ? `Sub ${idx+1}` : trackInfo.language.toUpperCase();
+             document.getElementById('subs-value').textContent = `${langName} (burned)`;
+             const list = document.getElementById('subs-list');
+             Array.from(list.children).forEach(c => c.classList.remove('selected'));
+             if(list.children[idx + 1]) list.children[idx + 1].classList.add('selected');
+             ccBtn.querySelector('.red-line').style.display = 'none';
+             ccBtn.style.opacity = '1';
+             return;
+         }
+
+         currentBurnSubtitleTrack = null;
 
          const trackEl = document.createElement('track');
          trackEl.kind = 'subtitles';
@@ -1131,10 +1175,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 removeSubtitleTracks();
 
                 const encodedPath = encodeURIComponent(currentVideoPath);
-                let url = `/stream/${encodedPath}?startTime=${newTime}&vCodec=${currentVideoCodec || ''}`;
-                if(currentAudioTrack !== null) url += `&audioIndex=${currentAudioTrack}`;
-                
-                videoPlayer.src = url;
+                videoPlayer.src = buildStreamUrl(encodedPath, newTime);
                 
                 if (currentSubtitleTrack !== -1) {
                      enableSubtitle(currentSubtitleTrack, undefined, encodedPath);
@@ -1388,10 +1429,7 @@ document.addEventListener('DOMContentLoaded', () => {
             captureFrame();
 
             const encodedPath = encodeURIComponent(currentVideoPath);
-            let url = `/stream/${encodedPath}?startTime=${newTime}&vCodec=${currentVideoCodec || ''}`;
-            if(currentAudioTrack !== null) url += `&audioIndex=${currentAudioTrack}`;
-            
-            videoPlayer.src = url;
+            videoPlayer.src = buildStreamUrl(encodedPath, newTime);
             
             if (currentSubtitleTrack !== -1) {
                  enableSubtitle(currentSubtitleTrack, undefined, encodedPath);

@@ -427,33 +427,32 @@ expressApp.get(/^\/api\/subtitles\/(.*)/, (req, res) => {
     // Path traversal attempt or invalid path
     if (!fullPath) return res.status(403).send('Access denied');
     
-    const streamIndex = req.query.streamIndex;
-    const startTime = req.query.startTime || 0;
+    const streamIndex = Number.parseInt(req.query.streamIndex, 10);
+    const startTime = Math.max(0, Number.parseFloat(req.query.startTime || '0') || 0);
+
+    if (!Number.isInteger(streamIndex) || streamIndex < 0) {
+        return res.status(400).send('Invalid subtitle stream index');
+    }
 
     if (!fs.existsSync(fullPath)) return res.sendStatus(404);
 
-    // console.log(`Extracting subtitles for stream ${streamIndex} from ${fullPath}`);
+    // console.log(`Extracting subtitles for stream ${streamIndex} from ${fullPath} @ ${startTime}s`);
 
     res.contentType('text/vtt');
     
-    // Attempt to be more accurate (though slower for very large sub files, but usually instant)
-    // Don't use -ss in inputOptions (fast seek/reset ts before input)
-    // Instead use -ss in output options (slow seek/process from start) so it cuts EXACTLY at startTime
-    // Subtitles are tiny text files usually (<1MB), so reading from start is fast.
-    
-    // const inputOptions = [];
-    // if (startTime > 0) {
-    //     inputOptions.push(`-ss ${startTime}`);
-    // }
+    const command = ffmpeg(fullPath);
 
-    const inputOptions = [];
+    if (startTime > 0) {
+        // Seek at input so the emitted VTT cues are close to zero-based playback time.
+        command.inputOptions([`-ss ${startTime}`]);
+    }
 
-    const command = ffmpeg(fullPath)
-        .inputOptions(inputOptions)
+    command
         .outputOptions([
-             `-ss ${startTime}`, // Output seek for precision
-             `-map 0:${streamIndex}`,
-             '-f webvtt'
+             `-map 0:${streamIndex}?`,
+             '-c:s webvtt',
+             '-f webvtt',
+             '-reset_timestamps 1'
         ])
         .on('error', (err) => {
              console.error('Subtitle extraction error:', err.message);
@@ -490,6 +489,7 @@ expressApp.get(/^\/stream\/(.*)/, (req, res) => {
     const startTime = req.query.startTime || 0;
     const clientVideoCodec = req.query.vCodec; 
     const audioIndex = req.query.audioIndex; // Desired audio stream index (absolute)
+    const subtitleIndex = Number.parseInt(req.query.subtitleIndex, 10); // Optional subtitle stream for burn-in
 
     const startStream = (vCodecName) => {
          let vCodec = 'libx264';
@@ -531,8 +531,15 @@ expressApp.get(/^\/stream\/(.*)/, (req, res) => {
              '-analyzeduration 10M'
          ]);
 
-         // Map video (default to first usually)
-         command.outputOptions(['-map 0:v:0']);
+            const hasBurnSubtitle = Number.isInteger(subtitleIndex) && subtitleIndex >= 0;
+
+            // Map video. If subtitle burn-in requested, render subtitle stream onto video.
+            if (hasBurnSubtitle) {
+                command.complexFilter([`[0:v:0][0:${subtitleIndex}]overlay[vsub]`]);
+                command.outputOptions(['-map [vsub]']);
+            } else {
+                command.outputOptions(['-map 0:v:0']);
+            }
 
          // Map Audio
          if (audioIndex !== undefined && audioIndex !== null) {
