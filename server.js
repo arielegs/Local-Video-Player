@@ -395,7 +395,9 @@ expressApp.get(/^\/api\/metadata\/(.*)/, (req, res) => {
                          index: s.index,
                          codec: s.codec_name,
                          language: (s.tags && s.tags.language) ? s.tags.language : 'und',
-                         title: (s.tags && s.tags.title) ? s.tags.title : `Subtitle ${subtitleTracks.length + 1}`
+                         title: (s.tags && s.tags.title) ? s.tags.title : `Subtitle ${subtitleTracks.length + 1}`,
+                         forced: s.disposition ? !!s.disposition.forced : false,
+                         default: s.disposition ? !!s.disposition.default : false
                      });
                  }
             });

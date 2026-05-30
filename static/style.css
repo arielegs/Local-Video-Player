@@ -10,6 +10,8 @@ body {
 .container {
     display: flex;
     height: 100%;
+    min-width: 0; /* Allow flex children to shrink in narrow windows */
+    min-height: 0;
 }
 
 .sidebar {
@@ -192,12 +194,15 @@ input:checked + .slider:before {
     padding: 20px;
     justify-content: center;
     align-items: center;
+    min-width: 0; /* Prevent overflow when sidebar + padding squeeze */
+    min-height: 0;
 }
 
 .player-container {
     position: relative;
-    width: 100%;
+    width: min(100%, calc((100vh - 180px) * 16 / 9));
     max-width: 1200px; /* Limit player width */
+    max-height: calc(100vh - 180px);
     background-color: #000;
     border-radius: 8px;
     overflow: hidden;
@@ -762,6 +767,20 @@ button:hover { opacity: 1; }
 .video-info {
     margin-top: 15px;
     text-align: center;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 0 10px;
+    box-sizing: border-box;
+}
+
+#current-video-title {
+    margin: 0;
+    font-size: clamp(0.95rem, 2.2vw, 1.3rem);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Scrollbar styling */

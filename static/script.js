@@ -699,14 +699,83 @@ document.addEventListener('DOMContentLoaded', () => {
         row.style.display = 'flex';
         ccBtn.style.display = 'block';
 
-        // Auto-select based on preference
+        // Auto-select based on structured preference (language/title/codec)
         if (currentSubtitleTrack === -1) {
-            const pref = localStorage.getItem('subLangPref');
-            if (pref && pref !== 'off') {
-                const match = tracks.find(t => t.language === pref);
+            const rawPref = localStorage.getItem('subLangPref');
+            if (rawPref && rawPref !== 'off') {
+                let prefObj = null;
+                try {
+                    prefObj = JSON.parse(rawPref);
+                } catch (e) {
+                    // legacy string format (language only)
+                    prefObj = { language: rawPref };
+                }
+
+
+                // Prefer exact title match within language
+                let match = null;
+                if (prefObj && prefObj.title) {
+                    const wantedTitle = (prefObj.title || '').trim();
+                    const wantedLang = (prefObj.language || 'und').toLowerCase();
+                    match = tracks.find(t => {
+                        const tTitle = (t.title || '').trim();
+                        const tLang = (t.language || 'und').toLowerCase();
+                        return wantedTitle && tTitle === wantedTitle && tLang === wantedLang;
+                    });
+                }
+
+                // Next try codec match within language (only if no title)
+                if (!match && prefObj && prefObj.codec) {
+                    const wantedCodec = (prefObj.codec || '').toLowerCase();
+                    const wantedLang = (prefObj.language || 'und').toLowerCase();
+                    match = tracks.find(t => {
+                        const tCodec = (t.codec || '').toLowerCase();
+                        const tLang = (t.language || 'und').toLowerCase();
+                        return wantedCodec && tCodec === wantedCodec && tLang === wantedLang;
+                    });
+                }
+
+                // Next try matching forced/default disposition within language
+                if (!match && prefObj && prefObj.language && (prefObj.forced !== undefined || prefObj.default !== undefined)) {
+                    const wantedLang = (prefObj.language || 'und').toLowerCase();
+                    match = tracks.find(t => {
+                        const tLang = (t.language || 'und').toLowerCase();
+                        const tForced = !!t.forced;
+                        const tDefault = !!t.default;
+                        const wantForced = !!prefObj.forced;
+                        const wantDefault = !!prefObj.default;
+                        return tLang === wantedLang && tForced === wantForced && tDefault === wantDefault;
+                    });
+                }
+
+                // Next try list index (Subtitle 1/2) if available
+                if (!match && prefObj && Number.isInteger(prefObj.listIndex)) {
+                    const idx = prefObj.listIndex;
+                    if (idx >= 0 && idx < tracks.length) {
+                        match = tracks[idx];
+                    }
+                }
+
+                // Next try ordinal match among same-language tracks (handles duplicate names)
+                if (!match && prefObj && (prefObj.language !== undefined) && typeof prefObj.langOrdinal === 'number') {
+                    const wantedLang = (prefObj.language || 'und').toLowerCase();
+                    const sameLangTracks = tracks.filter(t => (t.language || 'und').toLowerCase() === wantedLang);
+                    if (sameLangTracks.length > 0 && prefObj.langOrdinal >= 0 && prefObj.langOrdinal < sameLangTracks.length) {
+                        match = sameLangTracks[prefObj.langOrdinal];
+                    }
+                }
+
+                // Fallback to first language match
+                if (!match && prefObj && prefObj.language) {
+                    const wantedLang = (prefObj.language || 'und').toLowerCase();
+                    match = tracks.find(t => (t.language || 'und').toLowerCase() === wantedLang);
+                }
+
                 if (match) {
                      currentSubtitleTrack = match.index;
                      document.getElementById('subs-value').textContent = match.language.toUpperCase();
+                } else {
+                     document.getElementById('subs-value').textContent = 'Off';
                 }
             } else {
                 document.getElementById('subs-value').textContent = 'Off';
@@ -739,7 +808,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
             div.onclick = (e) => {
                 e.stopPropagation();
-                localStorage.setItem('subLangPref', track.language);
+                // Store a structured preference so we can match accurately across files
+                // Also store the ordinal position among tracks with the same language so
+                // we can pick the "second ENG track" on the next episode when names collide.
+                const normLang = (track.language || 'und').toLowerCase();
+                const normTitle = (track.title || '').trim();
+                const normCodec = (track.codec || '').toLowerCase();
+                const sameLang = tracks.filter(t => (t.language || 'und').toLowerCase() === normLang);
+                const langOrdinal = sameLang.findIndex(t => t.index === track.index);
+                const pref = {
+                    language: normLang,
+                    title: normTitle,
+                    codec: normCodec,
+                    index: track.index,
+                    langOrdinal,
+                    listIndex: i,
+                    forced: !!track.forced,
+                    default: !!track.default
+                };
+                localStorage.setItem('subLangPref', JSON.stringify(pref));
                 enableSubtitle(track.index, i, encodedPath); // stored index vs array index
                 showPanel('settings-main');
             };
