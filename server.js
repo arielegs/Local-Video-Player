@@ -501,28 +501,24 @@ expressApp.get(/^\/stream\/(.*)/, (req, res) => {
 
     const startTime = req.query.startTime || 0;
     const clientVideoCodec = req.query.vCodec; 
+    const copyVideoRequested = req.query.copyVideo === '1';
     const audioIndex = req.query.audioIndex; // Desired audio stream index (absolute)
     const subtitleIndex = Number.parseInt(req.query.subtitleIndex, 10); // Optional subtitle stream for burn-in
 
     const startStream = (vCodecName) => {
-         let vCodec = 'libx264';
-         // Standardize options for better sync
-         let additionalOptions = [
+         const hasBurnSubtitle = Number.isInteger(subtitleIndex) && subtitleIndex >= 0;
+         const canCopyVideo = copyVideoRequested && !hasBurnSubtitle && ['h264', 'avc1', 'hevc', 'h265'].includes(String(vCodecName).toLowerCase());
+         const vCodec = canCopyVideo ? 'copy' : 'libx264';
+         const additionalOptions = canCopyVideo ? [
+             '-avoid_negative_ts make_zero'
+         ] : [
              '-preset ultrafast',
              '-tune zerolatency',
              '-crf 23',
              '-pix_fmt yuv420p',
              '-g 60', // Force more frequent keyframes for seeking
-             '-sc_threshold 0' 
+             '-sc_threshold 0'
          ];
-         
-         // FORCE RE-ENCODE for now to fix sync issues. 
-         // 'copy' is the main culprit for A/V desync when seeking because 
-         // video snaps to keyframes while audio cuts precisely.
-         // if (vCodecName === 'h264' || vCodecName === 'avc1') {
-         //      vCodec = 'copy';
-         //      additionalOptions = []; 
-         // }
 
          res.contentType('video/mp4');
 
@@ -543,8 +539,6 @@ expressApp.get(/^\/stream\/(.*)/, (req, res) => {
              '-probesize 10M', 
              '-analyzeduration 10M'
          ]);
-
-            const hasBurnSubtitle = Number.isInteger(subtitleIndex) && subtitleIndex >= 0;
 
             // Map video. If subtitle burn-in requested, render subtitle stream onto video.
             if (hasBurnSubtitle) {

@@ -164,9 +164,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildStreamUrl(encodedPath, startTime) {
         let url = `/stream/${encodedPath}?startTime=${startTime}&vCodec=${currentVideoCodec || ''}`;
+        if (canRemuxVideo()) url += '&copyVideo=1';
         if (currentAudioTrack !== null) url += `&audioIndex=${currentAudioTrack}`;
         if (currentBurnSubtitleTrack !== null) url += `&subtitleIndex=${currentBurnSubtitleTrack}`;
         return url;
+    }
+
+    function canRemuxVideo() {
+        const codec = String(currentVideoCodec || '').toLowerCase();
+        if (codec === 'h264' || codec === 'avc1') return true;
+        if (codec === 'hevc' || codec === 'h265') {
+            return videoPlayer.canPlayType('video/mp4; codecs="hvc1"') !== '' ||
+                videoPlayer.canPlayType('video/mp4; codecs="hev1"') !== '';
+        }
+        return false;
     }
     
     let streamOffset = 0;
@@ -1325,6 +1336,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (commit) {
             if (isTranscoding) {
+                const targetTime = newTime - streamOffset;
+                const buffered = videoPlayer.buffered;
+                const isBuffered = targetTime >= 0 && Array.from({ length: buffered.length }, (_, i) => i)
+                    .some(i => targetTime >= buffered.start(i) && targetTime <= buffered.end(i));
+
+                if (isBuffered) {
+                    videoPlayer.currentTime = targetTime;
+                    videoPlayer.play().catch(e => console.log("Seek play suppressed", e));
+                    return;
+                }
+
                 // Buffer seek
                 streamOffset = newTime;
                 
@@ -1596,6 +1618,17 @@ document.addEventListener('DOMContentLoaded', () => {
         timeDisplay.textContent = `${formatTime(newTime)} / ${formatTime(duration)}`;
 
         if (isTranscoding) {
+            const targetTime = newTime - streamOffset;
+            const buffered = videoPlayer.buffered;
+            const isBuffered = targetTime >= 0 && Array.from({ length: buffered.length }, (_, i) => i)
+                .some(i => targetTime >= buffered.start(i) && targetTime <= buffered.end(i));
+
+            if (isBuffered) {
+                videoPlayer.currentTime = targetTime;
+                videoPlayer.play().catch(e => console.log("Seek play suppressed", e));
+                return;
+            }
+
             // For transcoding, we update the stream offset and reload
             // This mirrors the handleSeek logic for consistency
             streamOffset = newTime;
