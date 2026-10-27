@@ -289,11 +289,22 @@ expressApp.get('/api/videos', (req, res) => {
 // Progress API
 expressApp.post('/api/progress', (req, res) => {
     const { video_path, timestamp } = req.body;
-    if (video_path !== undefined && timestamp !== undefined) {
+    if (typeof video_path === 'string' && video_path.length > 0 && Number.isFinite(timestamp) && timestamp >= 0) {
         saveProgress(video_path, timestamp);
         res.json({ "status": "success" });
     } else {
         res.status(400).json({ "status": "error" });
+    }
+});
+
+expressApp.delete('/api/progress', (req, res) => {
+    try {
+        if (fs.existsSync(PROGRESS_FILE)) fs.rmSync(PROGRESS_FILE, { force: true });
+        if (fs.existsSync(LAST_PLAYED_FILE)) fs.rmSync(LAST_PLAYED_FILE, { force: true });
+        res.json({ "status": "success" });
+    } catch (error) {
+        console.error('Error clearing watch progress:', error.message);
+        res.status(500).json({ "status": "error" });
     }
 });
 

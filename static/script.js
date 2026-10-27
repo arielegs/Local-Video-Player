@@ -115,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const appSettingsBtn = document.getElementById("app-settings-btn");
     const folderClose = document.getElementById("folder-close");
     const settingsClose = document.getElementById("settings-close");
+    const clearProgressBtn = document.getElementById('clear-progress-btn');
     const browseBtn = document.getElementById("browse-btn");
     const dirInput = document.getElementById("video-dir-input");
     const folderSaveBtn = document.getElementById("folder-save-btn");
@@ -173,6 +174,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let controlsTimeout;
     let isDragging = false;
     let videoLoadId = 0; // Unique ID for each video load to prevent race conditions
+    let wakeRecoveryTimer = null;
+    let wasPlayingBeforeBackground = false;
+    let wasFullscreenBeforeBackground = false;
+    let lastVisibilityChange = 0;
     
     // Folder Polling
     let lastKnownVideos = [];
@@ -1048,6 +1053,74 @@ document.addEventListener('DOMContentLoaded', () => {
          }
     });
 
+    function getAbsolutePlaybackTime() {
+        const time = Number(videoPlayer.currentTime);
+        if (!Number.isFinite(time)) return 0;
+        return isTranscoding ? streamOffset + time : time;
+    }
+
+    function repaintVideoSurface() {
+        playerContainer.classList.remove('video-surface-refresh');
+        void playerContainer.offsetWidth;
+        playerContainer.classList.add('video-surface-refresh');
+        requestAnimationFrame(() => playerContainer.classList.remove('video-surface-refresh'));
+    }
+
+    function recoverAfterWake() {
+        if (!currentVideoPath || !wasPlayingBeforeBackground || videoPlayer.ended) return;
+
+        wasPlayingBeforeBackground = false;
+        const resumeTime = getAbsolutePlaybackTime();
+        const wasFullscreen = wasFullscreenBeforeBackground || Boolean(document.fullscreenElement);
+        videoLoadId++;
+        clearTimeout(wakeRecoveryTimer);
+        showLoading('Resuming video...');
+        repaintVideoSurface();
+
+        if (isTranscoding) {
+            videoPlayer.src = buildStreamUrl(encodeURIComponent(currentVideoPath), resumeTime);
+        } else {
+            videoPlayer.addEventListener('loadedmetadata', () => {
+                videoPlayer.currentTime = resumeTime;
+            }, { once: true });
+            videoPlayer.src = `/video/${encodeURIComponent(currentVideoPath)}`;
+        }
+
+        videoPlayer.play().catch(error => {
+            console.warn('Wake resume was not started:', error.message);
+            hideLoading();
+        });
+
+        if (wasFullscreen && !document.fullscreenElement) {
+            playerContainer.requestFullscreen().catch(() => {});
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            lastVisibilityChange = Date.now();
+            wasPlayingBeforeBackground = !videoPlayer.paused && !videoPlayer.ended;
+            wasFullscreenBeforeBackground = Boolean(document.fullscreenElement);
+            return;
+        }
+
+        if (wasPlayingBeforeBackground && Date.now() - lastVisibilityChange > 1000) {
+            wakeRecoveryTimer = setTimeout(recoverAfterWake, 250);
+        } else {
+            repaintVideoSurface();
+        }
+    });
+
+    window.addEventListener('focus', () => {
+        if (wasPlayingBeforeBackground && Date.now() - lastVisibilityChange > 1000) {
+            wakeRecoveryTimer = setTimeout(recoverAfterWake, 250);
+        } else {
+            repaintVideoSurface();
+        }
+    });
+
+    document.addEventListener('fullscreenchange', repaintVideoSurface);
+
     // Mute
     muteBtn.addEventListener('click', () => {
         videoPlayer.muted = !videoPlayer.muted;
@@ -1350,6 +1423,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    clearProgressBtn.addEventListener('click', () => {
+        clearProgressBtn.disabled = true;
+        authenticatedFetch('/api/progress', { method: 'DELETE' })
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then(() => {
+                document.querySelectorAll('.last-played-indicator').forEach(el => el.remove());
+                document.querySelectorAll('.video-item').forEach(el => el.classList.remove('active'));
+                loadVideos();
+                showSuccess('Watch progress cleared.');
+            })
+            .catch(error => showError('Could not clear progress', error.message))
+            .finally(() => { clearProgressBtn.disabled = false; });
+    });
 
     // Directory Browser
     folderBtn.onclick = () => { 
