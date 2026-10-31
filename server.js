@@ -61,6 +61,7 @@ const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
 const LAST_PLAYED_FILE = path.join(DATA_DIR, 'last_played.json');
 
 const metadataMap = new Map();
+let progressClearedAt = 0;
 
 // Helper functions (same logic as Python)
 function loadConfig() {
@@ -118,6 +119,29 @@ function loadProgress(videoPath) {
         } catch (e) { return 0; }
     }
     return 0;
+}
+
+function clearProgress(videoPath) {
+    let progress = {};
+    if (fs.existsSync(PROGRESS_FILE)) {
+        try {
+            progress = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
+        } catch (e) {}
+    }
+
+    delete progress[videoPath];
+    if (Object.keys(progress).length > 0) {
+        fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 4));
+    } else if (fs.existsSync(PROGRESS_FILE)) {
+        fs.rmSync(PROGRESS_FILE, { force: true });
+    }
+
+    if (fs.existsSync(LAST_PLAYED_FILE)) {
+        try {
+            const lastPlayed = JSON.parse(fs.readFileSync(LAST_PLAYED_FILE, 'utf8'));
+            if (lastPlayed.last_played === videoPath) fs.rmSync(LAST_PLAYED_FILE, { force: true });
+        } catch (e) {}
+    }
 }
 
 // Recursive file walker
@@ -288,8 +312,11 @@ expressApp.get('/api/videos', (req, res) => {
 
 // Progress API
 expressApp.post('/api/progress', (req, res) => {
-    const { video_path, timestamp } = req.body;
+    const { video_path, timestamp, client_updated_at } = req.body;
     if (typeof video_path === 'string' && video_path.length > 0 && Number.isFinite(timestamp) && timestamp >= 0) {
+        if (Number.isFinite(client_updated_at) && client_updated_at <= progressClearedAt) {
+            return res.json({ "status": "ignored" });
+        }
         saveProgress(video_path, timestamp);
         res.json({ "status": "success" });
     } else {
@@ -299,11 +326,25 @@ expressApp.post('/api/progress', (req, res) => {
 
 expressApp.delete('/api/progress', (req, res) => {
     try {
+        progressClearedAt = Date.now();
         if (fs.existsSync(PROGRESS_FILE)) fs.rmSync(PROGRESS_FILE, { force: true });
         if (fs.existsSync(LAST_PLAYED_FILE)) fs.rmSync(LAST_PLAYED_FILE, { force: true });
         res.json({ "status": "success" });
     } catch (error) {
         console.error('Error clearing watch progress:', error.message);
+        res.status(500).json({ "status": "error" });
+    }
+});
+
+expressApp.delete(/^\/api\/progress\/(.*)/, (req, res) => {
+    const videoPath = decodeURIComponent(req.params[0]);
+    if (!videoPath) return res.status(400).json({ "status": "error" });
+
+    try {
+        clearProgress(videoPath);
+        res.json({ "status": "success" });
+    } catch (error) {
+        console.error('Error clearing video progress:', error.message);
         res.status(500).json({ "status": "error" });
     }
 });

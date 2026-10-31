@@ -155,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSubtitleTrack = -1; // -1 for off
     let currentBurnSubtitleTrack = null; // absolute stream index for burned-in subtitles
     let availableSubtitles = [];
+    const completionThreshold = 0.9;
     const supportedSubtitleCodecs = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text']);
 
     function isSubtitleWebVttConvertible(track) {
@@ -189,6 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let wasPlayingBeforeBackground = false;
     let wasFullscreenBeforeBackground = false;
     let lastVisibilityChange = 0;
+    let progressClearGeneration = 0;
     
     // Folder Polling
     let lastKnownVideos = [];
@@ -351,10 +353,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Watch History Visualization ---
     function loadVideoProgress(videoPath, videoElement) {
         const encodedPath = encodeURIComponent(videoPath);
+        const requestGeneration = progressClearGeneration;
         
         authenticatedFetch(`/api/progress/${encodedPath}`)
             .then(res => res.ok ? res.json() : Promise.resolve({ timestamp: 0 }))
             .then(data => {
+                if (requestGeneration !== progressClearGeneration) return;
                 if (!data || !data.timestamp) return;
 
                 const watched = data.timestamp;
@@ -375,11 +379,12 @@ document.addEventListener('DOMContentLoaded', () => {
         currentVideoIndex = allVideos.indexOf(relPath);
         currentVideoElement = element;
         
-        // Save progress of previous
+        // Save progress of previous, unless it was effectively completed.
         if (currentVideoPath && !videoPlayer.paused) {
             let t = videoPlayer.currentTime;
             if (isTranscoding) t += streamOffset;
-            saveProgress(currentVideoPath, t);
+            if (isVideoComplete(t)) clearVideoProgress(currentVideoPath);
+            else saveProgress(currentVideoPath, t);
         }
         
         // Reset State
@@ -993,6 +998,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Find the video item by path matching
             const items = videoList.querySelectorAll('.video-item');
             if (nextIndex < items.length) {
+                const currentTime = getAbsolutePlaybackTime();
+                if (isVideoComplete(currentTime)) clearVideoProgress(currentVideoPath);
                 playVideo(allVideos[nextIndex], items[nextIndex]);
             }
         }
@@ -1016,6 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Auto-play next video when current video ends
     videoPlayer.addEventListener('ended', () => {
         if (allVideos.length === 0 || currentVideoIndex < 0) return;
+        clearVideoProgress(currentVideoPath);
         const nextIndex = currentVideoIndex + 1;
         if (nextIndex < allVideos.length) {
             // Find the video item by index
@@ -1436,7 +1444,7 @@ document.addEventListener('DOMContentLoaded', () => {
         authenticatedFetch('/api/progress', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ video_path: p, timestamp: t }),
+            body: JSON.stringify({ video_path: p, timestamp: t, client_updated_at: Date.now() }),
         }).then(() => {
             // Update the progress bar in the video list
             const videoItem = document.querySelector(`[data-path="${p}"]`);
@@ -1446,8 +1454,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function isVideoComplete(time) {
+        const duration = isTranscoding ? totalDuration : videoPlayer.duration;
+        return Number.isFinite(duration) && duration > 0 && time / duration >= completionThreshold;
+    }
+
+    function clearVideoProgress(videoPath) {
+        if (!videoPath) return Promise.resolve();
+        progressClearGeneration++;
+        return authenticatedFetch(`/api/progress/${encodeURIComponent(videoPath)}`, { method: 'DELETE' })
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            })
+            .catch(error => console.warn('Could not clear completed video progress:', error));
+    }
+
     clearProgressBtn.addEventListener('click', () => {
         clearProgressBtn.disabled = true;
+        progressClearGeneration++;
         authenticatedFetch('/api/progress', { method: 'DELETE' })
             .then(response => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
